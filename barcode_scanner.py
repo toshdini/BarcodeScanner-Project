@@ -22,23 +22,32 @@ class BarcodeScanner:
         self.api_timeout = 5  # seconds
 
     def preprocess_image(self, image):
-        """Enhanced image preprocessing for better barcode detection"""
+        """Enhanced image preprocessing specifically for barcode detection"""
         try:
+            # Ensure image is in BGR format
+            if len(image.shape) == 2:  # If grayscale
+                image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+            
             # Convert to grayscale
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             
+            # Increase contrast
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+            gray = clahe.apply(gray)
+            
+            # Apply bilateral filter to reduce noise while preserving edges
+            denoised = cv2.bilateralFilter(gray, 11, 17, 17)
+            
             # Apply adaptive thresholding
-            thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                         cv2.THRESH_BINARY, 11, 2)
+            thresh = cv2.adaptiveThreshold(denoised, 255, 
+                                         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                         cv2.THRESH_BINARY, 15, 2)
             
-            # Apply noise reduction
-            denoised = cv2.fastNlMeansDenoising(thresh)
+            # Morphological operations to clean up the image
+            kernel = np.ones((3,3), np.uint8)
+            processed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
             
-            # Enhance contrast
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-            enhanced = clahe.apply(denoised)
-            
-            return enhanced
+            return processed
         except Exception as e:
             logger.error(f"Error in image preprocessing: {str(e)}")
             return image
@@ -51,32 +60,59 @@ class BarcodeScanner:
         return True
 
     def scan_barcode(self, image):
-        """Enhanced barcode detection with multiple attempts and validation"""
+        """Enhanced barcode detection optimized for EAN-13"""
         try:
-            # Preprocess the image
-            processed_image = self.preprocess_image(image)
-            
-            # Try multiple times with different preprocessing
+            # Scale the image if it's too small
+            min_width = 640
+            if image.shape[1] < min_width:
+                scale = min_width / image.shape[1]
+                image = cv2.resize(image, None, fx=scale, fy=scale)
+
+            # Try multiple preprocessing techniques
             for attempt in range(self.max_retries):
-                barcodes = decode(processed_image)
-                
-                if barcodes:
-                    # Filter out small barcodes
-                    valid_barcodes = [b for b in barcodes 
-                                    if b.rect.width >= self.min_barcode_size 
-                                    and b.rect.height >= self.min_barcode_size]
-                    
-                    if valid_barcodes:
-                        barcode_data = valid_barcodes[0].data.decode('utf-8')
-                        if self.is_barcode_valid(barcode_data):
-                            return barcode_data
-                
-                # If no valid barcode found, try different preprocessing
+                if attempt == 0:
+                    processed_image = self.preprocess_image(image)
+                elif attempt == 1:
+                    # Try with Otsu's thresholding
+                    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                    _, processed_image = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                else:
+                    # Try with different blur and threshold
+                    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+                    processed_image = cv2.adaptiveThreshold(blurred, 255,
+                                                         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                                         cv2.THRESH_BINARY, 11, 2)
+
+                # Try different rotations
+                for angle in [0, 90, 180, 270]:
+                    rotated = processed_image
+                    if angle > 0:
+                        rotated = cv2.rotate(processed_image,
+                                           cv2.ROTATE_90_CLOCKWISE if angle == 90 else
+                                           cv2.ROTATE_180 if angle == 180 else
+                                           cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+                    # Try to decode barcodes with different options
+                    barcodes = decode(rotated)
+                    if not barcodes:
+                        # Try inverting the image
+                        barcodes = decode(cv2.bitwise_not(rotated))
+
+                    if barcodes:
+                        for barcode in barcodes:
+                            # Check if it's a valid EAN-13 barcode
+                            barcode_data = barcode.data.decode('utf-8')
+                            if len(barcode_data) == 13 and barcode_data.isdigit():
+                                logger.info(f"Found valid EAN-13 barcode: {barcode_data}")
+                                return barcode_data
+
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_delay)
-                    processed_image = cv2.rotate(processed_image, cv2.ROTATE_90_CLOCKWISE)
-            
+
+            logger.warning("No valid barcode found after all attempts")
             return None
+
         except Exception as e:
             logger.error(f"Error in barcode scanning: {str(e)}")
             return None
@@ -87,9 +123,13 @@ class BarcodeScanner:
         
         for attempt in range(self.max_retries):
             try:
+                logger.info(f"Attempting to fetch product info for barcode: {barcode}")
                 response = requests.get(url, timeout=self.api_timeout)
+                
                 if response.status_code == 200:
                     data = response.json()
+                    logger.info(f"API Response: {data}")
+                    
                     if data['status'] == 1:
                         product = data['product']
                         return {
@@ -98,17 +138,28 @@ class BarcodeScanner:
                             'category': product.get('categories', 'Unknown'),
                             'image_url': product.get('image_url', None)
                         }
+                    else:
+                        logger.warning(f"Product not found in database. Status: {data['status']}")
+                        return {'error': 'Product not found in database'}
                 elif response.status_code == 404:
+                    logger.warning(f"Product not found (404) for barcode: {barcode}")
                     return {'error': 'Product not found in database'}
+                else:
+                    logger.error(f"Unexpected status code: {response.status_code}")
+                    return {'error': f'API returned status code: {response.status_code}'}
+                    
             except requests.exceptions.Timeout:
                 logger.warning(f"API request timed out (attempt {attempt + 1})")
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Request error: {str(e)}")
             except Exception as e:
-                logger.error(f"Error fetching product information: {str(e)}")
+                logger.error(f"Unexpected error: {str(e)}")
             
             if attempt < self.max_retries - 1:
+                logger.info(f"Retrying in {self.retry_delay} seconds...")
                 time.sleep(self.retry_delay)
         
-        return {'error': 'Failed to retrieve product information'}
+        return {'error': 'Failed to retrieve product information after multiple attempts'}
 
     def webcam_scan(self):
         """Enhanced webcam scanning with better performance and error handling"""
