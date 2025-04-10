@@ -7,6 +7,8 @@ from PIL import Image
 import io
 import time
 import logging
+import threading
+import platform
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -434,9 +436,17 @@ class BarcodeScanner:
         frame_placeholder = st.empty()
         result_placeholder = st.empty()
         status_placeholder = st.empty()
+
+        result_container = {"barcode": None}
+        scanning_thread = None
+        scanning = False
+        scan_counter = 0
+
+        #Stop scanning button (before the loop)
+        stop = st.button("Stop Scanning", key="stop_webcam_scan")
         
         try:
-            cap = cv2.VideoCapture(0)
+            cap = get_working_camera()
             if not cap.isOpened():
                 raise Exception("Could not open webcam")
             
@@ -455,44 +465,118 @@ class BarcodeScanner:
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 frame_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
                 
-                # Check scan interval and barcode pattern
+
+                # Check scan interval and scan only every few seconds
                 current_time = time.time()
-                if current_time - self.last_scan_time >= self.scan_interval:
-                    if self.has_barcode_pattern(frame):
-                        status_placeholder.info("Barcode detected. Scanning...")
-                        barcode = self.scan_barcode(frame)
-                        
-                        if barcode:
-                            self.last_scan_time = current_time
-                            result_placeholder.success(f"Barcode detected: {barcode}")
-                            product_info = self.get_product_info(barcode)
-                            
-                            if 'error' in product_info:
-                                result_placeholder.error(product_info['error'])
-                            else:
-                                result_placeholder.write("Product Information:")
-                                result_placeholder.write(f"Company: {product_info['company']}")
-                                result_placeholder.write(f"Product Name: {product_info['product_name']}")
-                                result_placeholder.write(f"Category: {product_info['category']}")
-                                if product_info.get('image_url'):
-                                    result_placeholder.image(product_info['image_url'], 
-                                                           caption="Product Image", 
-                                                           use_column_width=True)
-                                break
-                        else:
-                            status_placeholder.warning("Could not decode barcode. Try adjusting the angle or lighting.")
-                    else:
-                        status_placeholder.info("No barcode detected in frame. Hold a barcode in front of the camera.")
-                
-                if st.button("Stop Scanning"):
+                #  Only scan if we're not already scanning and enough time has passed
+                if (not scanning) and (current_time - self.last_scan_time > self.scan_interval):
+                    scan_counter += 1
+                    status_placeholder.info(f"🔍 Scanning... Attempt #{scan_counter}")
+                    scanning = True
+                    result_container["barcode"] = None  # Clear previous result
+
+                    # Start threaded scan
+                    scanning_thread = threading.Thread(target=BarcodeScanner.threaded_scan, args=(self, frame.copy(), result_container))
+                    scanning_thread.start()
+                    self.last_scan_time = current_time
+        
+
+                # Check if scan completed
+                if result_container["barcode"]:
+                    barcode = result_container["barcode"]
+                    result_placeholder.success(f"Barcode detected: {barcode}")
+                    product_info = self.get_product_info(barcode)
+                    print("Retrieved barcode and product information: returning")
+                    return {
+                        "barcode": barcode,
+                        "product_info": product_info
+                    }
+
+                # If scanning thread is done but found nothing, reset scanning
+                elif scanning and not scanning_thread.is_alive() and result_container["barcode"] is None:
+                    scanning = False
+
+                if stop:
+
                     break
                     
         except Exception as e:
             st.error(f"Error in webcam scanning: {str(e)}")
         finally:
-            if 'cap' in locals():
+            if 'cap' in locals() and cap.isOpened():
                 cap.release()
             cv2.destroyAllWindows()
+
+        # Return None if nothing else returned earlier
+        return None
+
+    def display_product_info(self, barcode, product_info, placeholder=st):
+        placeholder.success(f"Barcode detected: {barcode}")
+
+        if 'error' in product_info:
+            placeholder.error(product_info['error'])
+        else:
+            placeholder.write("Product Information:")
+            placeholder.write(f"**Company:** {product_info['company']}")
+            placeholder.write(f"**Product Name:** {product_info['product_name']}")
+            placeholder.write(f"**Category:** {product_info['category']}")
+            if product_info.get('image_url'):
+                placeholder.image(product_info['image_url'], caption="Product Image", use_column_width=True)
+
+
+    @staticmethod
+    def threaded_scan(scanner, frame, result_container):
+        print("🔧 [Thread] Starting scan...")
+        barcode = scanner.scan_barcode(frame)
+        print(f" [Thread] Scan finished. Result: {barcode}")
+        if barcode is not None:
+            result_container["barcode"] = barcode
+
+#return a working and ready camera
+def get_working_camera(max_index=3, retries=5):
+    system = platform.system()
+
+    if system == "Darwin":
+        backend = cv2.CAP_AVFOUNDATION
+    elif system == "Windows":
+        backend = cv2.CAP_DSHOW
+    else:
+        backend = cv2.CAP_V4L2
+
+    for i in range(max_index):
+        cap = cv2.VideoCapture(i, backend)
+        if cap.isOpened():
+            print(f" Camera opened at index {i} using backend {backend}")
+
+            # Try to read a frame a few times
+            for attempt in range(retries):
+                ret, frame = cap.read()
+                if ret:
+                    print(" Camera frame read successfully.")
+                    return cap
+                else:
+                    print(f" Frame read failed (attempt {attempt + 1})")
+                    time.sleep(0.5)  # short delay between retries
+
+            cap.release()  # release this one and try next index
+
+    raise Exception(" Could not read from any available webcam.")
+
+def webcam(scanner):
+    result = scanner.webcam_scan()
+    print(f"Printing result: {result}")
+    #display information
+    if result:
+        barcode = result["barcode"]
+        product_info = result["product_info"]
+
+        # If product not found, offer to rescan
+        if 'error' in product_info:
+            if st.button("Scan Another Product"):
+                return webcam(scanner)
+
+    return result
+
 
 def main():
     st.title("Barcode Scanner App")
@@ -513,26 +597,18 @@ def main():
                 with st.spinner("Scanning..."):
                     barcode = scanner.scan_barcode(image)
                     if barcode:
-                        st.success(f"Barcode detected: {barcode}")
                         product_info = scanner.get_product_info(barcode)
-                        
-                        if 'error' in product_info:
-                            st.error(product_info['error'])
-                        else:
-                            st.write("Product Information:")
-                            st.write(f"Company: {product_info['company']}")
-                            st.write(f"Product Name: {product_info['product_name']}")
-                            st.write(f"Category: {product_info['category']}")
-                            if product_info.get('image_url'):
-                                st.image(product_info['image_url'], 
-                                       caption="Product Image", 
-                                       use_column_width=True)
+                        scanner.display_product_info(barcode, product_info)
                     else:
                         st.error("No barcode detected in the image")
     
     else:  # Webcam mode
         if st.button("Start Webcam"):
-            scanner.webcam_scan()
+            result = webcam(scanner)
+            barcode = result["barcode"]
+            product_info = result["product_info"]
+            scanner.display_product_info(barcode, product_info)
 
+                
 if __name__ == "__main__":
     main() 
