@@ -496,39 +496,227 @@ class BarcodeScanner:
 
 def main():
     st.title("Barcode Scanner App")
-    st.write("Upload an image or use your webcam to scan a barcode")
+    st.write("Upload images or use your webcam to scan barcodes")
     
     scanner = BarcodeScanner()
     
-    mode = st.sidebar.radio("Select Input Mode:", ["Upload Image", "Webcam"])
+    mode = st.sidebar.radio("Select Input Mode:", ["Upload Images", "Webcam"])
     
-    if mode == "Upload Image":
-        uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
-        if uploaded_file is not None:
-            image = Image.open(uploaded_file)
-            image = np.array(image)
-            st.image(image, caption="Uploaded Image", use_column_width=True)
+    if mode == "Upload Images":
+        # Allow multiple file uploads
+        uploaded_files = st.file_uploader("Choose images...", 
+                                        type=["jpg", "jpeg", "png"],
+                                        accept_multiple_files=True)
+        
+        if uploaded_files:
+            # Add toggle for batch processing
+            batch_mode = st.checkbox("Process all images at once", value=True)
             
-            if st.button("Scan Barcode"):
-                with st.spinner("Scanning..."):
-                    barcode = scanner.scan_barcode(image)
-                    if barcode:
-                        st.success(f"Barcode detected: {barcode}")
-                        product_info = scanner.get_product_info(barcode)
+            if batch_mode:
+                # Process all images at once
+                if st.button("Scan All Images"):
+                    with st.spinner("Processing all images..."):
+                        # Add custom CSS for uniform cards
+                        st.markdown("""
+                            <style>
+                            .result-card {
+                                padding: 20px;
+                                border-radius: 10px;
+                                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                                background-color: #f8f9fa;
+                                margin: 20px 0;
+                                width: 100%;
+                            }
+                            .image-container {
+                                width: 100%;
+                                height: 200px;
+                                overflow: hidden;
+                                display: flex;
+                                justify-content: center;
+                                align-items: center;
+                                background-color: #fff;
+                                border-radius: 8px;
+                                margin-bottom: 15px;
+                            }
+                            .image-container img {
+                                max-width: 100%;
+                                max-height: 100%;
+                                object-fit: contain;
+                            }
+                            .product-info {
+                                padding: 15px;
+                                background-color: #fff;
+                                border-radius: 8px;
+                                margin-top: 10px;
+                            }
+                            .info-grid {
+                                display: grid;
+                                grid-template-columns: 1fr 1fr;
+                                gap: 15px;
+                            }
+                            .info-item {
+                                padding: 10px;
+                                background-color: #f8f9fa;
+                                border-radius: 5px;
+                            }
+                            .info-label {
+                                font-weight: bold;
+                                color: #666;
+                                margin-bottom: 5px;
+                            }
+                            .info-value {
+                                color: #333;
+                            }
+                            </style>
+                        """, unsafe_allow_html=True)
                         
-                        if 'error' in product_info:
-                            st.error(product_info['error'])
-                        else:
-                            st.write("Product Information:")
-                            st.write(f"Company: {product_info['company']}")
-                            st.write(f"Product Name: {product_info['product_name']}")
-                            st.write(f"Category: {product_info['category']}")
-                            if product_info.get('image_url'):
-                                st.image(product_info['image_url'], 
-                                       caption="Product Image", 
-                                       use_column_width=True)
-                    else:
-                        st.error("No barcode detected in the image")
+                        # Create a container for results
+                        results_container = st.container()
+                        
+                        # Process all images
+                        for uploaded_file in uploaded_files:
+                            with results_container:
+                                st.markdown('<div class="result-card">', unsafe_allow_html=True)
+                                
+                                # Header with filename
+                                st.write(f"### {uploaded_file.name}")
+                                
+                                # Create two columns for original and product images
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.markdown('<div class="image-container">', unsafe_allow_html=True)
+                                    image = Image.open(uploaded_file)
+                                    st.image(image, 
+                                           caption="Original Image",
+                                           use_column_width=True)
+                                    st.markdown('</div>', unsafe_allow_html=True)
+                                
+                                # Process the image
+                                image_np = np.array(image)
+                                barcode = scanner.scan_barcode(image_np)
+                                
+                                if barcode:
+                                    st.success(f"Barcode detected: {barcode}")
+                                    product_info = scanner.get_product_info(barcode)
+                                    
+                                    if 'error' in product_info:
+                                        st.error(product_info['error'])
+                                    else:
+                                        with col2:
+                                            if product_info.get('image_url'):
+                                                st.markdown('<div class="image-container">', unsafe_allow_html=True)
+                                                st.image(product_info['image_url'], 
+                                                       caption="Product Image",
+                                                       use_column_width=True)
+                                                st.markdown('</div>', unsafe_allow_html=True)
+                                            else:
+                                                st.markdown('<div class="image-container">', unsafe_allow_html=True)
+                                                st.write("No product image available")
+                                                st.markdown('</div>', unsafe_allow_html=True)
+                                        
+                                        # Product information in a grid layout
+                                        st.markdown('<div class="product-info">', unsafe_allow_html=True)
+                                        st.write("### Product Information")
+                                        
+                                        st.markdown('<div class="info-grid">', unsafe_allow_html=True)
+                                        
+                                        # Company and Category
+                                        st.markdown('<div class="info-item">', unsafe_allow_html=True)
+                                        st.markdown('<div class="info-label">Company</div>', unsafe_allow_html=True)
+                                        st.markdown(f'<div class="info-value">{product_info["company"]}</div>', unsafe_allow_html=True)
+                                        st.markdown('</div>', unsafe_allow_html=True)
+                                        
+                                        st.markdown('<div class="info-item">', unsafe_allow_html=True)
+                                        st.markdown('<div class="info-label">Category</div>', unsafe_allow_html=True)
+                                        st.markdown(f'<div class="info-value">{product_info["category"]}</div>', unsafe_allow_html=True)
+                                        st.markdown('</div>', unsafe_allow_html=True)
+                                        
+                                        st.markdown('</div>', unsafe_allow_html=True)  # Close info-grid
+                                        
+                                        # Product Name (full width)
+                                        st.markdown('<div class="info-item" style="grid-column: 1 / -1;">', unsafe_allow_html=True)
+                                        st.markdown('<div class="info-label">Product Name</div>', unsafe_allow_html=True)
+                                        st.markdown(f'<div class="info-value">{product_info["product_name"]}</div>', unsafe_allow_html=True)
+                                        st.markdown('</div>', unsafe_allow_html=True)
+                                        
+                                        st.markdown('</div>', unsafe_allow_html=True)  # Close product-info
+                                else:
+                                    st.error("No barcode detected in the image")
+                                
+                                st.markdown('</div>', unsafe_allow_html=True)  # Close result-card
+                                st.markdown("---")  # Separator between cards
+            else:
+                # Process images independently
+                # Create a grid layout for results
+                cols = st.columns(2)
+                col_index = 0
+                
+                for uploaded_file in uploaded_files:
+                    # Display original image
+                    image = Image.open(uploaded_file)
+                    image_np = np.array(image)
+                    
+                    # Use alternating columns for better layout
+                    with cols[col_index]:
+                        st.image(image, 
+                               caption=f"Original Image: {uploaded_file.name}",
+                               use_column_width=True)
+                        
+                        if st.button(f"Scan Barcode", key=f"scan_{uploaded_file.name}"):
+                            with st.spinner(f"Scanning {uploaded_file.name}..."):
+                                barcode = scanner.scan_barcode(image_np)
+                                
+                                if barcode:
+                                    st.success(f"Barcode detected: {barcode}")
+                                    product_info = scanner.get_product_info(barcode)
+                                    
+                                    if 'error' in product_info:
+                                        st.error(product_info['error'])
+                                    else:
+                                        # Create a beautiful card-like display
+                                        st.markdown("""
+                                            <style>
+                                            .product-card {
+                                                padding: 20px;
+                                                border-radius: 10px;
+                                                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                                                background-color: #f8f9fa;
+                                                margin: 10px 0;
+                                            }
+                                            </style>
+                                        """, unsafe_allow_html=True)
+                                        
+                                        st.markdown('<div class="product-card">', unsafe_allow_html=True)
+                                        st.write("### Product Information")
+                                        
+                                        # Display product image if available
+                                        if product_info.get('image_url'):
+                                            st.image(product_info['image_url'], 
+                                                   caption="Product Image",
+                                                   use_column_width=True)
+                                        
+                                        # Display product details in a structured format
+                                        col1, col2 = st.columns(2)
+                                        with col1:
+                                            st.write("**Company:**")
+                                            st.write(product_info['company'])
+                                            st.write("**Category:**")
+                                            st.write(product_info['category'])
+                                        with col2:
+                                            st.write("**Product Name:**")
+                                            st.write(product_info['product_name'])
+                                        
+                                        st.markdown('</div>', unsafe_allow_html=True)
+                                else:
+                                    st.error("No barcode detected in the image")
+                    
+                    # Alternate between columns
+                    col_index = (col_index + 1) % 2
+                    
+                    # Add a separator between images
+                    if col_index == 0:
+                        st.markdown("---")
     
     else:  # Webcam mode
         if st.button("Start Webcam"):
