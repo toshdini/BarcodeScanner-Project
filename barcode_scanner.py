@@ -220,6 +220,12 @@ class BarcodeScanner:
                     result_placeholder.success(f"Barcode detected: {barcode}")
                     product_info = self.get_product_info(barcode)
 
+                    return {
+                        "barcode": barcode,
+                        "product_info": product_info
+                    }
+
+
                     if 'error' in product_info:
                         result_placeholder.error(product_info['error'])
                     else:
@@ -235,33 +241,6 @@ class BarcodeScanner:
                 elif scanning and not scanning_thread.is_alive() and result_container["barcode"] is None:
                     scanning = False
 
-
-                # if current_time - self.last_scan_time >= self.scan_interval:
-                #     status_placeholder.info("Scanning...")
-                #     barcode = self.scan_barcode(frame)
-                #     #update whether found or not
-                #     last_scan_time = current_time
-
-                #     if barcode:
-                #         result_placeholder.success(f"Barcode detected: {barcode}")
-                #         product_info = self.get_product_info(barcode)
-                        
-                #         if 'error' in product_info:
-                #             result_placeholder.error(product_info['error'])
-                #         else:
-                #             result_placeholder.write("Product Information:")
-                #             result_placeholder.write(f"Company: {product_info['company']}")
-                #             result_placeholder.write(f"Product Name: {product_info['product_name']}")
-                #             result_placeholder.write(f"Category: {product_info['category']}")
-                #             if product_info.get('image_url'):
-                #                 result_placeholder.image(product_info['image_url'], 
-                #                                        caption="Product Image", 
-                #                                        use_column_width=True)
-                #             #stop after successful scan
-                #             break 
-                #     else:
-                #         status_placeholder.warning("No barcode detected. Try adjusting the angle or lighting.")
-                
                 if stop:
                     break
                     
@@ -271,7 +250,22 @@ class BarcodeScanner:
             if 'cap' in locals() and cap.isOpened():
                 cap.release()
             cv2.destroyAllWindows()
-    
+            return None
+
+    def display_product_info(self, barcode, product_info, placeholder=st):
+        placeholder.success(f"Barcode detected: {barcode}")
+
+        if 'error' in product_info:
+            placeholder.error(product_info['error'])
+        else:
+            placeholder.write("Product Information:")
+            placeholder.write(f"**Company:** {product_info['company']}")
+            placeholder.write(f"**Product Name:** {product_info['product_name']}")
+            placeholder.write(f"**Category:** {product_info['category']}")
+            if product_info.get('image_url'):
+                placeholder.image(product_info['image_url'], caption="Product Image", use_column_width=True)
+
+
     @staticmethod
     def threaded_scan(scanner, frame, result_container):
         print("🔧 [Thread] Starting scan...")
@@ -331,26 +325,18 @@ def main():
                 with st.spinner("Scanning..."):
                     barcode = scanner.scan_barcode(image)
                     if barcode:
-                        st.success(f"Barcode detected: {barcode}")
                         product_info = scanner.get_product_info(barcode)
-                        
-                        if 'error' in product_info:
-                            st.error(product_info['error'])
-                        else:
-                            st.write("Product Information:")
-                            st.write(f"Company: {product_info['company']}")
-                            st.write(f"Product Name: {product_info['product_name']}")
-                            st.write(f"Category: {product_info['category']}")
-                            if product_info.get('image_url'):
-                                st.image(product_info['image_url'], 
-                                       caption="Product Image", 
-                                       use_column_width=True)
+                        scanner.display_product_info(barcode, product_info)
                     else:
                         st.error("No barcode detected in the image")
     
     else:  # Webcam mode
         if st.button("Start Webcam"):
-            scanner.webcam_scan()
+            result = scanner.webcam_scan()
+
+            #display information
+            if result:
+                scanner.display_product_info(result["barcode"], result["product_info"])
 
 if __name__ == "__main__":
     main() 
