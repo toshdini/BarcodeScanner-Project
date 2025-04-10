@@ -8,6 +8,7 @@ import io
 import time
 import logging
 import threading
+import platform
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -179,7 +180,7 @@ class BarcodeScanner:
         stop = st.button("Stop Scanning", key="stop_webcam_scan")
         
         try:
-            cap = cv2.VideoCapture(0)
+            cap = get_working_camera()
             if not cap.isOpened():
                 raise Exception("Could not open webcam")
             
@@ -200,20 +201,20 @@ class BarcodeScanner:
                 
                 # Check scan interval and scan only every few seconds
                 current_time = time.time()
-                # ✅ Only scan if we're not already scanning and enough time has passed
+                #  Only scan if we're not already scanning and enough time has passed
                 if (not scanning) and (current_time - self.last_scan_time > self.scan_interval):
                     scan_counter += 1
                     status_placeholder.info(f"🔍 Scanning... Attempt #{scan_counter}")
                     scanning = True
                     result_container["barcode"] = None  # Clear previous result
 
-                    # ✅ Start threaded scan
+                    # Start threaded scan
                     scanning_thread = threading.Thread(target=BarcodeScanner.threaded_scan, args=(self, frame.copy(), result_container))
                     scanning_thread.start()
                     self.last_scan_time = current_time
         
 
-                # ✅ Check if scan completed
+                # Check if scan completed
                 if result_container["barcode"]:
                     barcode = result_container["barcode"]
                     result_placeholder.success(f"Barcode detected: {barcode}")
@@ -229,8 +230,8 @@ class BarcodeScanner:
                         if product_info.get('image_url'):
                             result_placeholder.image(product_info['image_url'], caption="Product Image", use_column_width=True)
 
-                    break  # ✅ stop after successful scan
-                # ✅ If scanning thread is done but found nothing, reset scanning
+                    break  # stop after successful scan
+                # If scanning thread is done but found nothing, reset scanning
                 elif scanning and not scanning_thread.is_alive() and result_container["barcode"] is None:
                     scanning = False
 
@@ -267,7 +268,7 @@ class BarcodeScanner:
         except Exception as e:
             st.error(f"Error in webcam scanning: {str(e)}")
         finally:
-            if 'cap' in locals():
+            if 'cap' in locals() and cap.isOpened():
                 cap.release()
             cv2.destroyAllWindows()
     
@@ -275,9 +276,39 @@ class BarcodeScanner:
     def threaded_scan(scanner, frame, result_container):
         print("🔧 [Thread] Starting scan...")
         barcode = scanner.scan_barcode(frame)
-        print(f"✅ [Thread] Scan finished. Result: {barcode}")
+        print(f" [Thread] Scan finished. Result: {barcode}")
         if barcode is not None:
             result_container["barcode"] = barcode
+
+#return a working and ready camera
+def get_working_camera(max_index=3, retries=5):
+    system = platform.system()
+
+    if system == "Darwin":
+        backend = cv2.CAP_AVFOUNDATION
+    elif system == "Windows":
+        backend = cv2.CAP_DSHOW
+    else:
+        backend = cv2.CAP_V4L2
+
+    for i in range(max_index):
+        cap = cv2.VideoCapture(i, backend)
+        if cap.isOpened():
+            print(f" Camera opened at index {i} using backend {backend}")
+
+            # Try to read a frame a few times
+            for attempt in range(retries):
+                ret, frame = cap.read()
+                if ret:
+                    print(" Camera frame read successfully.")
+                    return cap
+                else:
+                    print(f" Frame read failed (attempt {attempt + 1})")
+                    time.sleep(0.5)  # short delay between retries
+
+            cap.release()  # release this one and try next index
+
+    raise Exception(" Could not read from any available webcam.")
 
 
 
