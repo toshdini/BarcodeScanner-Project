@@ -214,7 +214,7 @@ class BarcodeScanner:
         
 
                 # ✅ Check if scan completed
-                if scanning and result_container["barcode"]:
+                if result_container["barcode"]:
                     barcode = result_container["barcode"]
                     result_placeholder.success(f"Barcode detected: {barcode}")
                     product_info = self.get_product_info(barcode)
@@ -230,6 +230,9 @@ class BarcodeScanner:
                             result_placeholder.image(product_info['image_url'], caption="Product Image", use_column_width=True)
 
                     break  # ✅ stop after successful scan
+                # ✅ If scanning thread is done but found nothing, reset scanning
+                elif scanning and not scanning_thread.is_alive() and result_container["barcode"] is None:
+                    scanning = False
 
 
                 # if current_time - self.last_scan_time >= self.scan_interval:
@@ -270,8 +273,12 @@ class BarcodeScanner:
     
     @staticmethod
     def threaded_scan(scanner, frame, result_container):
+        print("🔧 [Thread] Starting scan...")
         barcode = scanner.scan_barcode(frame)
-        result_container["barcode"] = barcode
+        print(f"✅ [Thread] Scan finished. Result: {barcode}")
+        if barcode is not None:
+            result_container["barcode"] = barcode
+
 
 
 def main():
