@@ -443,7 +443,8 @@ class BarcodeScanner:
         scan_counter = 0
 
         #Stop scanning button (before the loop)
-        stop = st.button("Stop Scanning", key="stop_webcam_scan")
+        stop_button_key = f"stop_webcam_scan_{int(time.time())}"
+        stop = st.button("Stop Scanning", key=stop_button_key)
         
         try:
             cap = get_working_camera()
@@ -563,17 +564,10 @@ def get_working_camera(max_index=3, retries=5):
     raise Exception(" Could not read from any available webcam.")
 
 def webcam(scanner):
-    result = scanner.webcam_scan()
+    
     print(f"Printing result: {result}")
     #display information
-    if result:
-        barcode = result["barcode"]
-        product_info = result["product_info"]
-
-        # If product not found, offer to rescan
-        if 'error' in product_info:
-            if st.button("Scan Another Product"):
-                return webcam(scanner)
+    
 
     return result
 
@@ -583,7 +577,7 @@ def main():
     st.write("Upload an image or use your webcam to scan a barcode")
     
     scanner = BarcodeScanner()
-    
+    restart = None;
     mode = st.sidebar.radio("Select Input Mode:", ["Upload Image", "Webcam"])
     
     if mode == "Upload Image":
@@ -604,11 +598,12 @@ def main():
     
     else:  # Webcam mode
         if st.button("Start Webcam"):
-            result = webcam(scanner)
-            barcode = result["barcode"]
-            product_info = result["product_info"]
-            scanner.display_product_info(barcode, product_info)
-
+            result = scanner.webcam_scan()
+            if result:
+                barcode = result["barcode"]
+                product_info = result["product_info"]
+                scanner.display_product_info(barcode, product_info)
+                restart = st.button("Scan Another Product")
                 
 if __name__ == "__main__":
     main() 
