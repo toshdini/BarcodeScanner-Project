@@ -192,14 +192,15 @@ class BarcodeScanner:
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 frame_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
                 
-                # Check scan interval
+                # Check scan interval and scan only every few seconds
                 current_time = time.time()
                 if current_time - self.last_scan_time >= self.scan_interval:
                     status_placeholder.info("Scanning...")
                     barcode = self.scan_barcode(frame)
-                    
+                    #update whether found or not
+                    last_scan_time = current_time
+
                     if barcode:
-                        self.last_scan_time = current_time
                         result_placeholder.success(f"Barcode detected: {barcode}")
                         product_info = self.get_product_info(barcode)
                         
@@ -214,7 +215,8 @@ class BarcodeScanner:
                                 result_placeholder.image(product_info['image_url'], 
                                                        caption="Product Image", 
                                                        use_column_width=True)
-                            break
+                            #stop after successful scan
+                            break 
                     else:
                         status_placeholder.warning("No barcode detected. Try adjusting the angle or lighting.")
                 
