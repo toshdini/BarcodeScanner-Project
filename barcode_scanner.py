@@ -219,24 +219,12 @@ class BarcodeScanner:
                     barcode = result_container["barcode"]
                     result_placeholder.success(f"Barcode detected: {barcode}")
                     product_info = self.get_product_info(barcode)
-
+                    print("Retrieved barcode and product information: returning")
                     return {
                         "barcode": barcode,
                         "product_info": product_info
                     }
 
-
-                    if 'error' in product_info:
-                        result_placeholder.error(product_info['error'])
-                    else:
-                        result_placeholder.write("Product Information:")
-                        result_placeholder.write(f"Company: {product_info['company']}")
-                        result_placeholder.write(f"Product Name: {product_info['product_name']}")
-                        result_placeholder.write(f"Category: {product_info['category']}")
-                        if product_info.get('image_url'):
-                            result_placeholder.image(product_info['image_url'], caption="Product Image", use_column_width=True)
-
-                    break  # stop after successful scan
                 # If scanning thread is done but found nothing, reset scanning
                 elif scanning and not scanning_thread.is_alive() and result_container["barcode"] is None:
                     scanning = False
@@ -250,7 +238,9 @@ class BarcodeScanner:
             if 'cap' in locals() and cap.isOpened():
                 cap.release()
             cv2.destroyAllWindows()
-            return None
+
+        # Return None if nothing else returned earlier
+        return None
 
     def display_product_info(self, barcode, product_info, placeholder=st):
         placeholder.success(f"Barcode detected: {barcode}")
@@ -304,6 +294,20 @@ def get_working_camera(max_index=3, retries=5):
 
     raise Exception(" Could not read from any available webcam.")
 
+def webcam(scanner):
+    result = scanner.webcam_scan()
+    print(f"Printing result: {result}")
+    #display information
+    if result:
+        barcode = result["barcode"]
+        product_info = result["product_info"]
+
+        # If product not found, offer to rescan
+        if 'error' in product_info:
+            if st.button("Scan Another Product"):
+                return webcam(scanner)
+
+    return result
 
 
 def main():
@@ -332,11 +336,11 @@ def main():
     
     else:  # Webcam mode
         if st.button("Start Webcam"):
-            result = scanner.webcam_scan()
+            result = webcam(scanner)
+            barcode = result["barcode"]
+            product_info = result["product_info"]
+            scanner.display_product_info(barcode, product_info)
 
-            #display information
-            if result:
-                scanner.display_product_info(result["barcode"], result["product_info"])
-
+                
 if __name__ == "__main__":
     main() 
