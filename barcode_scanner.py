@@ -7,6 +7,7 @@ from PIL import Image
 import io
 import time
 import logging
+import threading
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -169,6 +170,11 @@ class BarcodeScanner:
         result_placeholder = st.empty()
         status_placeholder = st.empty()
 
+        result_container = {"barcode": None}
+        scanning_thread = None
+        scanning = False
+        attempts = 0;
+
         #Stop scanning button (before the loop)
         stop = st.button("Stop Scanning", key="stop_webcam_scan")
         
@@ -194,31 +200,62 @@ class BarcodeScanner:
                 
                 # Check scan interval and scan only every few seconds
                 current_time = time.time()
-                if current_time - self.last_scan_time >= self.scan_interval:
+                # ✅ Only scan if we're not already scanning and enough time has passed
+                if (not scanning) and (current_time - self.last_scan_time > self.scan_interval):
                     status_placeholder.info("Scanning...")
-                    barcode = self.scan_barcode(frame)
-                    #update whether found or not
-                    last_scan_time = current_time
+                    scanning = True
+                    result_container["barcode"] = None  # Clear previous result
 
-                    if barcode:
-                        result_placeholder.success(f"Barcode detected: {barcode}")
-                        product_info = self.get_product_info(barcode)
-                        
-                        if 'error' in product_info:
-                            result_placeholder.error(product_info['error'])
-                        else:
-                            result_placeholder.write("Product Information:")
-                            result_placeholder.write(f"Company: {product_info['company']}")
-                            result_placeholder.write(f"Product Name: {product_info['product_name']}")
-                            result_placeholder.write(f"Category: {product_info['category']}")
-                            if product_info.get('image_url'):
-                                result_placeholder.image(product_info['image_url'], 
-                                                       caption="Product Image", 
-                                                       use_column_width=True)
-                            #stop after successful scan
-                            break 
+                    # ✅ Start threaded scan
+                    scanning_thread = threading.Thread(target=BarcodeScanner.threaded_scan, args=(self, frame.copy(), result_container))
+                    scanning_thread.start()
+                    self.last_scan_time = current_time
+                    attempts += 1
+
+                # ✅ Check if scan completed
+                if scanning and result_container["barcode"]:
+                    barcode = result_container["barcode"]
+                    result_placeholder.success(f"Barcode detected: {barcode}")
+                    product_info = self.get_product_info(barcode)
+
+                    if 'error' in product_info:
+                        result_placeholder.error(product_info['error'])
                     else:
-                        status_placeholder.warning("No barcode detected. Try adjusting the angle or lighting.")
+                        result_placeholder.write("Product Information:")
+                        result_placeholder.write(f"Company: {product_info['company']}")
+                        result_placeholder.write(f"Product Name: {product_info['product_name']}")
+                        result_placeholder.write(f"Category: {product_info['category']}")
+                        if product_info.get('image_url'):
+                            result_placeholder.image(product_info['image_url'], caption="Product Image", use_column_width=True)
+
+                    break  # ✅ stop after successful scan
+
+
+                # if current_time - self.last_scan_time >= self.scan_interval:
+                #     status_placeholder.info("Scanning...")
+                #     barcode = self.scan_barcode(frame)
+                #     #update whether found or not
+                #     last_scan_time = current_time
+
+                #     if barcode:
+                #         result_placeholder.success(f"Barcode detected: {barcode}")
+                #         product_info = self.get_product_info(barcode)
+                        
+                #         if 'error' in product_info:
+                #             result_placeholder.error(product_info['error'])
+                #         else:
+                #             result_placeholder.write("Product Information:")
+                #             result_placeholder.write(f"Company: {product_info['company']}")
+                #             result_placeholder.write(f"Product Name: {product_info['product_name']}")
+                #             result_placeholder.write(f"Category: {product_info['category']}")
+                #             if product_info.get('image_url'):
+                #                 result_placeholder.image(product_info['image_url'], 
+                #                                        caption="Product Image", 
+                #                                        use_column_width=True)
+                #             #stop after successful scan
+                #             break 
+                #     else:
+                #         status_placeholder.warning("No barcode detected. Try adjusting the angle or lighting.")
                 
                 if stop:
                     break
@@ -229,6 +266,12 @@ class BarcodeScanner:
             if 'cap' in locals():
                 cap.release()
             cv2.destroyAllWindows()
+    
+    @staticmethod
+    def threaded_scan(scanner, frame, result_container):
+        barcode = scanner.scan_barcode(frame)
+        result_container["barcode"] = barcode
+
 
 def main():
     st.title("Barcode Scanner App")
