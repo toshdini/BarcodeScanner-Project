@@ -168,6 +168,9 @@ class BarcodeScanner:
         frame_placeholder = st.empty()
         result_placeholder = st.empty()
         status_placeholder = st.empty()
+
+        #Stop scanning button (before the loop)
+        stop = st.button("Stop Scanning", key="stop_webcam_scan")
         
         try:
             cap = cv2.VideoCapture(0)
@@ -215,7 +218,7 @@ class BarcodeScanner:
                     else:
                         status_placeholder.warning("No barcode detected. Try adjusting the angle or lighting.")
                 
-                if st.button("Stop Scanning"):
+                if stop:
                     break
                     
         except Exception as e:
