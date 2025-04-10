@@ -572,8 +572,7 @@ def webcam(scanner):
 
         # If product not found, offer to rescan
         if 'error' in product_info:
-            if st.button("Scan Another Product"):
-                return webcam(scanner)
+            return webcam(scanner)
 
     return result
 
@@ -583,7 +582,7 @@ def main():
     st.write("Upload an image or use your webcam to scan a barcode")
     
     scanner = BarcodeScanner()
-    
+    stop = None;
     mode = st.sidebar.radio("Select Input Mode:", ["Upload Image", "Webcam"])
     
     if mode == "Upload Image":
@@ -608,7 +607,9 @@ def main():
             barcode = result["barcode"]
             product_info = result["product_info"]
             scanner.display_product_info(barcode, product_info)
-
+            stop = st.button("Scan Another Product")
+            if stop:
+                return webcam(scanner)
                 
 if __name__ == "__main__":
     main() 
