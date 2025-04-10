@@ -119,49 +119,315 @@ class BarcodeScanner:
             logger.error(f"Error in barcode scanning: {str(e)}")
             return None
 
-    def get_product_info(self, barcode):
-        """Enhanced product information retrieval with retry mechanism"""
+    def get_product_info(self, barcode, barcode_type=None):
+        """Enhanced product information retrieval with format-specific handling and improved error handling"""
+        try:
+            logger.info(f"Starting product info retrieval for barcode: {barcode}")
+            
+            # Validate barcode input
+            if not barcode or not isinstance(barcode, str):
+                logger.error(f"Invalid barcode input: {barcode}")
+                return {
+                    'error': 'Invalid barcode format',
+                    'details': 'Barcode must be a non-empty string',
+                    'barcode': barcode
+                }
+            
+            # Format-specific API endpoints and handling
+            api_handlers = {
+                'EAN13': self._handle_ean13,
+                'UPC_A': self._handle_upc_a,
+                'CODE128': self._handle_code128,
+                'QRCODE': self._handle_qrcode,
+                'CODE39': self._handle_code39
+            }
+            
+            # If barcode_type is not provided, try to determine it
+            if not barcode_type:
+                logger.debug("Barcode type not provided, attempting to determine type")
+                barcode_type = self._determine_barcode_type(barcode)
+                logger.info(f"Determined barcode type: {barcode_type}")
+            
+            # Validate barcode type
+            if barcode_type not in api_handlers:
+                logger.warning(f"Unsupported barcode type: {barcode_type}")
+                return {
+                    'error': 'Unsupported barcode type',
+                    'details': f'Barcode type {barcode_type} is not supported',
+                    'supported_types': list(api_handlers.keys()),
+                    'barcode': barcode
+                }
+            
+            # Get the appropriate handler
+            handler = api_handlers.get(barcode_type, self._handle_unknown)
+            logger.debug(f"Using handler: {handler.__name__}")
+            
+            result = handler(barcode)
+            logger.info(f"Successfully retrieved product info for {barcode_type} barcode: {barcode}")
+            return result
+            
+        except Exception as e:
+            error_details = {
+                'error': str(e),
+                'type': type(e).__name__,
+                'barcode': barcode,
+                'barcode_type': barcode_type,
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            logger.error(f"Error in product info retrieval: {error_details}")
+            return {
+                'error': 'Failed to retrieve product information',
+                'details': error_details
+            }
+
+    def _determine_barcode_type(self, barcode):
+        """Determine barcode type based on format and length"""
+        if len(barcode) == 13 and barcode.isdigit():
+            return 'EAN13'
+        elif len(barcode) == 12 and barcode.isdigit():
+            return 'UPC_A'
+        elif len(barcode) > 0 and all(c in '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%' for c in barcode):
+            return 'CODE39'
+        elif len(barcode) > 0:  # Default to CODE128 for other cases
+            return 'CODE128'
+        return 'UNKNOWN'
+
+    def _handle_ean13(self, barcode):
+        """Handle EAN-13 barcodes with Open Food Facts API"""
         url = f"https://world.openfoodfacts.org/api/v0/product/{barcode}.json"
+        return self._make_api_request(url, 'EAN-13')
+
+    def _handle_upc_a(self, barcode):
+        """Handle UPC-A barcodes by converting to EAN-13"""
+        # Convert UPC-A to EAN-13 by adding '0' prefix
+        ean13_barcode = '0' + barcode
+        return self._handle_ean13(ean13_barcode)
+
+    def _handle_code128(self, barcode):
+        """Handle CODE128 barcodes with enhanced error handling and logging"""
+        logger.info(f"Processing CODE128 barcode: {barcode}")
+        
+        endpoints = [
+            {
+                'url': f"https://world.openfoodfacts.org/api/v0/product/{barcode}.json",
+                'name': 'Open Food Facts'
+            },
+            {
+                'url': f"https://api.upcitemdb.com/prod/trial/lookup?upc={barcode}",
+                'name': 'UPC Item DB'
+            }
+        ]
+        
+        for endpoint in endpoints:
+            logger.info(f"Trying {endpoint['name']} API")
+            result = self._make_api_request(endpoint['url'], 'CODE128')
+            
+            if result.get('error') != 'Product not found':
+                logger.info(f"Successfully found product in {endpoint['name']}")
+                return result
+            
+            logger.warning(f"Product not found in {endpoint['name']}")
+        
+        error_msg = 'Product not found in any database'
+        logger.error(error_msg)
+        return {
+            'error': error_msg,
+            'details': {
+                'barcode': barcode,
+                'type': 'CODE128',
+                'attempted_apis': [e['name'] for e in endpoints]
+            }
+        }
+
+    def _handle_qrcode(self, barcode):
+        """Handle QR codes with enhanced validation and logging"""
+        logger.info(f"Processing QR code: {barcode}")
+        
+        try:
+            if barcode.startswith(('http://', 'https://')):
+                logger.info("QR code contains URL")
+                return {
+                    'type': 'URL',
+                    'url': barcode,
+                    'message': 'QR code contains a URL',
+                    'validation': {
+                        'is_valid_url': True,
+                        'protocol': barcode.split('://')[0]
+                    }
+                }
+            else:
+                logger.info("QR code contains text content")
+                return {
+                    'type': 'TEXT',
+                    'content': barcode,
+                    'message': 'QR code contains text content',
+                    'validation': {
+                        'length': len(barcode),
+                        'is_printable': all(c.isprintable() for c in barcode)
+                    }
+                }
+        except Exception as e:
+            error_msg = f"Error processing QR code: {str(e)}"
+            logger.error(error_msg)
+            return {
+                'error': error_msg,
+                'details': {
+                    'barcode': barcode,
+                    'type': 'QRCODE'
+                }
+            }
+
+    def _handle_code39(self, barcode):
+        """Handle CODE39 barcodes with inventory lookup"""
+        # Example implementation for inventory system
+        return {
+            'type': 'CODE39',
+            'barcode': barcode,
+            'message': 'CODE39 barcode detected',
+            'inventory_info': self._lookup_inventory(barcode)
+        }
+
+    def _handle_unknown(self, barcode):
+        """Handle unknown barcode formats"""
+        return {
+            'error': f'Unsupported barcode format: {barcode}',
+            'suggestion': 'Please use EAN-13, UPC-A, CODE128, or QR code'
+        }
+
+    def _make_api_request(self, url, barcode_type):
+        """Make API request with enhanced retry mechanism and detailed logging"""
+        request_details = {
+            'url': url,
+            'barcode_type': barcode_type,
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        logger.info(f"Starting API request: {request_details}")
         
         for attempt in range(self.max_retries):
             try:
-                logger.info(f"Attempting to fetch product info for barcode: {barcode}")
+                logger.debug(f"Attempt {attempt + 1}/{self.max_retries}")
                 response = requests.get(url, timeout=self.api_timeout)
+                
+                # Log response details
+                response_details = {
+                    'status_code': response.status_code,
+                    'headers': dict(response.headers),
+                    'attempt': attempt + 1
+                }
+                logger.debug(f"API response details: {response_details}")
                 
                 if response.status_code == 200:
                     data = response.json()
-                    logger.info(f"API Response: {data}")
+                    logger.debug(f"API response data: {data}")
                     
-                    if data['status'] == 1:
+                    if 'product' in data:
                         product = data['product']
-                        return {
+                        result = {
+                            'type': barcode_type,
                             'company': product.get('brands', 'Unknown'),
                             'product_name': product.get('product_name', 'Unknown'),
                             'category': product.get('categories', 'Unknown'),
                             'image_url': product.get('image_url', None)
                         }
+                        logger.info(f"Successfully processed API response: {result}")
+                        return result
                     else:
-                        logger.warning(f"Product not found in database. Status: {data['status']}")
-                        return {'error': 'Product not found in database'}
-                elif response.status_code == 404:
-                    logger.warning(f"Product not found (404) for barcode: {barcode}")
-                    return {'error': 'Product not found in database'}
-                else:
-                    logger.error(f"Unexpected status code: {response.status_code}")
-                    return {'error': f'API returned status code: {response.status_code}'}
+                        error_msg = 'Product not found in database'
+                        logger.warning(f"{error_msg}. Response: {data}")
+                        return {'error': error_msg}
                     
+                elif response.status_code == 404:
+                    error_msg = 'Product not found in database'
+                    logger.warning(f"{error_msg}. Status code: 404")
+                    return {'error': error_msg}
+                
+                elif response.status_code == 429:  # Rate limiting
+                    retry_after = response.headers.get('Retry-After', self.retry_delay)
+                    logger.warning(f"Rate limited. Retrying after {retry_after} seconds")
+                    time.sleep(float(retry_after))
+                    continue
+                
+                else:
+                    error_msg = f'Unexpected status code: {response.status_code}'
+                    logger.error(f"{error_msg}. Response: {response.text}")
+                    if attempt < self.max_retries - 1:
+                        time.sleep(self.retry_delay)
+                        continue
+                    return {'error': error_msg}
+                
             except requests.exceptions.Timeout:
-                logger.warning(f"API request timed out (attempt {attempt + 1})")
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Request error: {str(e)}")
-            except Exception as e:
-                logger.error(f"Unexpected error: {str(e)}")
+                error_msg = f"API request timed out (attempt {attempt + 1})"
+                logger.warning(error_msg)
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
+                    continue
+                return {'error': 'API request timed out'}
             
-            if attempt < self.max_retries - 1:
-                logger.info(f"Retrying in {self.retry_delay} seconds...")
-                time.sleep(self.retry_delay)
+            except requests.exceptions.ConnectionError:
+                error_msg = f"Connection error (attempt {attempt + 1})"
+                logger.error(error_msg)
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
+                    continue
+                return {'error': 'Connection error'}
+            
+            except requests.exceptions.RequestException as e:
+                error_msg = f"Request error: {str(e)}"
+                logger.error(error_msg)
+                return {'error': error_msg}
+            
+            except Exception as e:
+                error_msg = f"Unexpected error: {str(e)}"
+                logger.error(error_msg)
+                return {'error': error_msg}
         
-        return {'error': 'Failed to retrieve product information after multiple attempts'}
+        error_msg = 'Failed to retrieve product information after multiple attempts'
+        logger.error(error_msg)
+        return {'error': error_msg}
+
+    def _lookup_inventory(self, barcode):
+        """Look up product in inventory system (placeholder implementation)"""
+        # This is a placeholder for inventory system integration
+        return {
+            'status': 'Not implemented',
+            'message': 'Inventory lookup system not integrated'
+        }
+
+    def has_barcode_pattern(self, image):
+        """Check if the image contains a barcode-like pattern"""
+        try:
+            # Convert to grayscale
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            
+            # Apply Sobel edge detection
+            sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+            sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+            
+            # Calculate gradient magnitude
+            magnitude = np.sqrt(sobelx**2 + sobely**2)
+            
+            # Normalize
+            magnitude = cv2.normalize(magnitude, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+            
+            # Apply threshold
+            _, binary = cv2.threshold(magnitude, 50, 255, cv2.THRESH_BINARY)
+            
+            # Find contours
+            contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Check for barcode-like patterns (rectangular shapes with high aspect ratio)
+            for contour in contours:
+                x, y, w, h = cv2.boundingRect(contour)
+                aspect_ratio = float(w) / h if h > 0 else 0
+                
+                # Barcode-like patterns typically have high aspect ratios
+                if aspect_ratio > 2.0 and w > 100 and h > 20:
+                    return True
+            
+            return False
+        except Exception as e:
+            logger.error(f"Error in barcode pattern detection: {str(e)}")
+            return False
 
     def webcam_scan(self):
         """Enhanced webcam scanning with better performance and error handling"""
@@ -199,6 +465,7 @@ class BarcodeScanner:
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 frame_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
                 
+
                 # Check scan interval and scan only every few seconds
                 current_time = time.time()
                 #  Only scan if we're not already scanning and enough time has passed
@@ -230,6 +497,7 @@ class BarcodeScanner:
                     scanning = False
 
                 if stop:
+
                     break
                     
         except Exception as e:
