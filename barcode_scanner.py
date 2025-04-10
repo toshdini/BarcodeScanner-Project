@@ -173,7 +173,7 @@ class BarcodeScanner:
         result_container = {"barcode": None}
         scanning_thread = None
         scanning = False
-        attempts = 0;
+        scan_counter = 0
 
         #Stop scanning button (before the loop)
         stop = st.button("Stop Scanning", key="stop_webcam_scan")
@@ -202,7 +202,8 @@ class BarcodeScanner:
                 current_time = time.time()
                 # ✅ Only scan if we're not already scanning and enough time has passed
                 if (not scanning) and (current_time - self.last_scan_time > self.scan_interval):
-                    status_placeholder.info("Scanning...")
+                    scan_counter += 1
+                    status_placeholder.info(f"🔍 Scanning... Attempt #{scan_counter}")
                     scanning = True
                     result_container["barcode"] = None  # Clear previous result
 
@@ -210,7 +211,7 @@ class BarcodeScanner:
                     scanning_thread = threading.Thread(target=BarcodeScanner.threaded_scan, args=(self, frame.copy(), result_container))
                     scanning_thread.start()
                     self.last_scan_time = current_time
-                    attempts += 1
+        
 
                 # ✅ Check if scan completed
                 if scanning and result_container["barcode"]:
